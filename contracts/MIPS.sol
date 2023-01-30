@@ -2,19 +2,18 @@
 pragma solidity ^0.7.3;
 import "./MIPSMemory.sol";
 
-// https://inst.eecs.berkeley.edu/~cs61c/resources/MIPS_Green_Sheet.pdf
-// https://uweb.engr.arizona.edu/~ece369/Resources/spim/MIPSReference.pdf
-// https://en.wikibooks.org/wiki/MIPS_Assembly/Instruction_Formats
-
-// https://www.cs.cmu.edu/afs/cs/academic/class/15740-f97/public/doc/mips-isa.pdf
-// page A-177
-
-// This is a separate contract from the challenge contract
-// Anyone can use it to validate a MIPS state transition
-// First, to prepare, you call AddMerkleState, which adds valid state nodes in the stateHash. 
-// If you are using the Preimage oracle, you call AddPreimage
-// Then, you call Step. Step will revert if state is missing. If all state is present, it will return the next hash
-
+/// @title MIPS virtual machine
+/// @notice This is a separate contract from the challenge contract
+///         Anyone can use it to validate a MIPS state transition
+///         First, to prepare, you call AddMerkleState, which adds valid state nodes in the stateHash.
+///         If you are using the Preimage oracle, you call AddPreimage
+///         Then, you call Step. Step will revert if state is missing.
+///         If all state is present, it will return the next hash
+/// @custom:reference https://inst.eecs.berkeley.edu/~cs61c/resources/MIPS_Green_Sheet.pdf
+///                   https://uweb.engr.arizona.edu/~ece369/Resources/spim/MIPSReference.pdf
+///                   https://en.wikibooks.org/wiki/MIPS_Assembly/Instruction_Formats
+///                   https://www.cs.cmu.edu/afs/cs/academic/class/15740-f97/public/doc/mips-isa.pdf
+///                   page A-177
 contract MIPS {
   MIPSMemory public immutable m;
 
@@ -40,6 +39,11 @@ contract MIPS {
   event TryReadMemory(uint32 addr);
   event DidReadMemory(uint32 addr, uint32 value);
 
+  /// @notice Write a value to the given address of the MIPS machine memory
+  /// @param stateHash Known MIPS state root hash
+  /// @param addr Memory address to write
+  /// @param value Memory value to write
+  /// @return New MIPS state root hash
   function WriteMemory(bytes32 stateHash, uint32 addr, uint32 value) internal returns (bytes32) {
     if (address(m) != address(0)) {
       emit DidWriteMemory(addr, value);
@@ -54,6 +58,10 @@ contract MIPS {
     return stateHash;
   }
 
+  /// @notice Read a value from the given address of the MIPS machine memory
+  /// @param stateHash MIPS state root hash
+  /// @param addr Memory address to read
+  /// @return Value from the given address
   function ReadMemory(bytes32 stateHash, uint32 addr) internal returns (uint32 ret) {
     if (address(m) != address(0)) {
       emit TryReadMemory(addr);
@@ -66,6 +74,10 @@ contract MIPS {
     }
   }
 
+  /// @notice Execute next multiple MIPS instructions and return the updated state root hash
+  /// @param stateHash MIPS state root hash
+  /// @param count Number of instruction to execute
+  /// @return New MIPS state root hash
   function Steps(bytes32 stateHash, uint count) public returns (bytes32) {
     for (uint i = 0; i < count; i++) {
       stateHash = Step(stateHash);
@@ -73,6 +85,10 @@ contract MIPS {
     return stateHash;
   }
 
+  /// @notice Sign extension to 32bits
+  /// @param dat Original value
+  /// @param idx Number of bits of the original value
+  /// @return Sign extended value
   function SE(uint32 dat, uint32 idx) internal pure returns (uint32) {
     bool isSigned = (dat >> (idx-1)) != 0;
     uint256 signed = ((1 << (32-idx)) - 1) << idx;
@@ -80,6 +96,10 @@ contract MIPS {
     return uint32(dat&mask | (isSigned ? signed : 0));
   }
 
+  /// @notice Handle syscall instruction
+  /// @param MIPS state root hash
+  /// @return New MIPS state root hash
+  /// @return True if the syscall is exit
   function handleSyscall(bytes32 stateHash) internal returns (bytes32, bool) {
     uint32 syscall_no = ReadMemory(stateHash, REG_OFFSET+2*4);
     uint32 v0 = 0;
@@ -112,6 +132,10 @@ contract MIPS {
     return (stateHash, exit);
   }
 
+  /// @notice Execute next single MIPS instruction and return the updated state root hash.
+  ///         Read PC from registry and return the same state hash if the program is exited.
+  /// @param stateHash MIPS state root hash
+  /// @return New MIPS state root hash
   function Step(bytes32 stateHash) public returns (bytes32 newStateHash) {
     uint32 pc = ReadMemory(stateHash, REG_PC);
     if (pc == 0x5ead0000) {
@@ -123,7 +147,12 @@ contract MIPS {
     }
   }
 
-  // will revert if any required input state is missing
+  /// @notice Execute single MIPS instruction from the given PC and return the updated state root hash.
+  ///         will revert if any required input state is missing
+  /// @param stateHash MIPS state root hash
+  /// @param pc Program counter
+  /// @param nextPC Next program counter
+  /// @return New MIPS state root hash
   function stepPC(bytes32 stateHash, uint32 pc, uint32 nextPC) internal returns (bytes32) {
     // instruction fetch
     uint32 insn = ReadMemory(stateHash, pc);
@@ -289,6 +318,12 @@ contract MIPS {
     return stateHash;
   }
 
+  /// @notice Execute arithmetic, logical, comparison operation for instructions
+  /// @param insn opcode and function
+  /// @param rs Register source
+  /// @param rt Register target
+  /// @param mem Value from memory
+  /// @return Operation result
   function execute(uint32 insn, uint32 rs, uint32 rt, uint32 mem) internal pure returns (uint32) {
     uint32 opcode = insn >> 26;    // 6-bits
     uint32 func = insn & 0x3f; // 6-bits
